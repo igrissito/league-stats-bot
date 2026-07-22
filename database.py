@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from config import DB_PATH
+from riot_api import SOLO_DUO_QUEUE_ID
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS summoners (
@@ -107,25 +108,25 @@ def save_match_participation(match_id, puuid, champion, kills, deaths, assists, 
 
 
 def get_summoner_summary(puuid: str):
-    """Returns (totals_row, top_champions_rows) aggregated from all stored matches."""
+    """Returns (totals_row, top_champions_rows) aggregated from stored Ranked Solo/Duo matches."""
     with get_connection() as conn:
         totals = conn.execute(
             """SELECT COUNT(*) AS games, SUM(win) AS wins,
                       SUM(kills) AS k, SUM(deaths) AS d, SUM(assists) AS a
-               FROM match_participations WHERE puuid = ?""",
-            (puuid,),
+               FROM match_participations WHERE puuid = ? AND queue_id = ?""",
+            (puuid, SOLO_DUO_QUEUE_ID),
         ).fetchone()
         champs = conn.execute(
             """SELECT champion, COUNT(*) AS games, SUM(win) AS wins
-               FROM match_participations WHERE puuid = ?
+               FROM match_participations WHERE puuid = ? AND queue_id = ?
                GROUP BY champion ORDER BY games DESC LIMIT 3""",
-            (puuid,),
+            (puuid, SOLO_DUO_QUEUE_ID),
         ).fetchall()
         return totals, champs
 
 
 def get_leaderboard(min_games: int = 1):
-    """Tracked summoners ranked by win rate, using whatever history is stored."""
+    """Tracked summoners ranked by Ranked Solo/Duo win rate, using whatever history is stored."""
     with get_connection() as conn:
         return conn.execute(
             """SELECT s.riot_id AS riot_id,
@@ -133,8 +134,9 @@ def get_leaderboard(min_games: int = 1):
                       SUM(m.win) AS wins
                FROM summoners s
                JOIN match_participations m ON m.puuid = s.puuid
+               WHERE m.queue_id = ?
                GROUP BY s.puuid
                HAVING games >= ?
                ORDER BY (CAST(wins AS FLOAT) / games) DESC, games DESC""",
-            (min_games,),
+            (SOLO_DUO_QUEUE_ID, min_games),
         ).fetchall()

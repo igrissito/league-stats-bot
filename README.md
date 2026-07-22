@@ -5,7 +5,7 @@ A Discord bot that tracks League of Legends ranked stats for a friend group usin
 ## Commands
 
 - `!register Name#Tag` -- start tracking a summoner (Riot ID format, e.g. `!register Faker#KR1`)
-- `!stats <name>` -- recent ranked KDA, win rate, and top champions
+- `!stats <name>` -- recent Ranked Solo/Duo KDA, win rate, and top champions
 - `!leaderboard` -- ranks all tracked friends by win rate
 
 ## How the Riot API flow works
@@ -13,8 +13,10 @@ A Discord bot that tracks League of Legends ranked stats for a friend group usin
 Riot IDs (`Name#Tag`) aren't directly usable for match history -- they have to be exchanged for a **PUUID** first:
 
 1. **account-v1**: `Name#Tag` -> PUUID (`/riot/account/v1/accounts/by-riot-id/{name}/{tag}`)
-2. **match-v5**: PUUID -> recent ranked match IDs (`/lol/match/v5/matches/by-puuid/{puuid}/ids?type=ranked`)
+2. **match-v5**: PUUID -> recent Ranked Solo/Duo match IDs only (`/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420`)
 3. **match-v5**: match ID -> full match detail, including every participant's champion/K/D/A/win (`/lol/match/v5/matches/{matchId}`)
+
+Only queue 420 (Ranked Solo/Duo) is tracked -- Flex, normals, ARAM, etc. are filtered out both at the fetch (`queue=420`) and storage/query level, so they never factor into stats or the leaderboard.
 
 All three calls go to the **europe** *regional* routing host (`europe.api.riotgames.com`), not a per-platform host like `euw1`. Regional routing (europe/americas/asia) is what account-v1 and match-v5 use; platform routing (euw1, na1, ...) is a separate concept used by other endpoints (summoner-v4, league-v4) that this Phase 1 bot doesn't need. EUW1 (Europe West) belongs to the `europe` regional cluster, which is why this works for players in Austria.
 
@@ -69,6 +71,6 @@ py bot.py
 
 ## Known Phase 1 limitations
 
-- `!stats` pulls up to the 10 most recent ranked games per call (both solo/duo and flex combined, no queue split).
+- `!stats` pulls up to the 10 most recent Ranked Solo/Duo games per call.
 - `!leaderboard` only includes summoners who've had `!stats` run at least once -- it reads stored history, it doesn't proactively fetch for everyone.
 - Champion names are Riot's internal names (e.g. `MonkeyKing` for Wukong).

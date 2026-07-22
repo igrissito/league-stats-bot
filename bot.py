@@ -4,7 +4,7 @@ from discord.ext import commands
 
 import config
 import database
-from riot_api import RiotAPIError, RiotClient
+from riot_api import SOLO_DUO_QUEUE_ID, RiotAPIError, RiotClient
 
 intents = discord.Intents.default()
 intents.message_content = True  # required to read "!stats Name" style command text
@@ -73,7 +73,7 @@ async def stats(ctx: commands.Context, *, name: str = None):
 
     async with ctx.typing():
         try:
-            match_ids = await bot.riot_client.get_ranked_match_ids(summoner["puuid"], count=10)
+            match_ids = await bot.riot_client.get_solo_duo_match_ids(summoner["puuid"], count=10)
             new_matches = 0
             for match_id in match_ids:
                 if database.match_exists(match_id, summoner["puuid"]):
@@ -82,6 +82,9 @@ async def stats(ctx: commands.Context, *, name: str = None):
                 match = await bot.riot_client.get_match(match_id)
                 if match is None:
                     continue
+
+                if match["info"]["queueId"] != SOLO_DUO_QUEUE_ID:
+                    continue  # belt-and-suspenders: only ranked solo/duo counts
 
                 participant = next(
                     (p for p in match["info"]["participants"] if p["puuid"] == summoner["puuid"]),
@@ -109,7 +112,7 @@ async def stats(ctx: commands.Context, *, name: str = None):
     totals, champs = database.get_summoner_summary(summoner["puuid"])
     games = totals["games"] or 0
     if games == 0:
-        await ctx.send(f"No ranked matches found yet for **{summoner['riot_id']}**.")
+        await ctx.send(f"No ranked solo/duo matches found yet for **{summoner['riot_id']}**.")
         return
 
     wins = totals["wins"] or 0
@@ -118,8 +121,8 @@ async def stats(ctx: commands.Context, *, name: str = None):
     kda_ratio = (kills + assists) / deaths if deaths > 0 else float(kills + assists)
 
     embed = discord.Embed(
-        title=f"{summoner['riot_id']} -- Ranked Stats",
-        description=f"Based on {games} stored ranked game(s) ({new_matches} fetched just now)",
+        title=f"{summoner['riot_id']} -- Ranked Solo/Duo Stats",
+        description=f"Based on {games} stored solo/duo game(s) ({new_matches} fetched just now)",
         color=discord.Color.blue(),
     )
     embed.add_field(name="Win Rate", value=f"{win_rate:.1f}% ({wins}W {games - wins}L)", inline=True)
@@ -134,7 +137,7 @@ async def stats(ctx: commands.Context, *, name: str = None):
         ]
         embed.add_field(name="Top Champions", value="\n".join(champ_lines), inline=False)
     embed.set_footer(
-        text="Stats accumulate over time -- each !stats call fetches up to 10 newest ranked games."
+        text="Stats accumulate over time -- each !stats call fetches up to 10 newest ranked solo/duo games."
     )
 
     await ctx.send(embed=embed)

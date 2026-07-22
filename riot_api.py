@@ -2,7 +2,7 @@
 
 Flow used by this bot:
   1. account-v1  (by-riot-id)   "Name#Tag"      -> puuid
-  2. match-v5    (by-puuid/ids) puuid           -> list of recent ranked match IDs
+  2. match-v5    (by-puuid/ids) puuid           -> list of recent Ranked Solo/Duo match IDs (queue=420)
   3. match-v5    (matches/{id}) match id         -> full match detail (all 10 participants)
 
 Steps 1-3 all use *regional* routing (europe/americas/asia), which is a
@@ -16,6 +16,10 @@ from collections import deque
 from urllib.parse import quote
 
 import aiohttp
+
+# Riot's queue ID for Ranked Solo/Duo (as opposed to 440 for Ranked Flex,
+# etc.) -- https://static.developer.riotgames.com/docs/lol/queues.json
+SOLO_DUO_QUEUE_ID = 420
 
 
 class RiotAPIError(Exception):
@@ -104,9 +108,10 @@ class RiotClient:
         data = await self._get(url)
         return data["puuid"] if data else None
 
-    async def get_ranked_match_ids(self, puuid: str, count: int = 10) -> list[str]:
+    async def get_solo_duo_match_ids(self, puuid: str, count: int = 10) -> list[str]:
+        """Recent Ranked Solo/Duo match IDs only (queue=420 filters server-side)."""
         url = f"{self._base_url}/lol/match/v5/matches/by-puuid/{puuid}/ids"
-        params = {"type": "ranked", "start": 0, "count": count}
+        params = {"queue": SOLO_DUO_QUEUE_ID, "start": 0, "count": count}
         data = await self._get(url, params=params)
         return data or []
 
