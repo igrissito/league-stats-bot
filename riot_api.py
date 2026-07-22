@@ -1,14 +1,16 @@
-"""Async Riot Games API client: Riot ID -> PUUID -> match history.
+"""Async Riot Games API client: Riot ID -> PUUID -> match history / rank.
 
 Flow used by this bot:
-  1. account-v1  (by-riot-id)   "Name#Tag"      -> puuid
-  2. match-v5    (by-puuid/ids) puuid           -> list of recent Ranked Solo/Duo match IDs (queue=420)
-  3. match-v5    (matches/{id}) match id         -> full match detail (all 10 participants)
+  1. account-v1  (by-riot-id)      "Name#Tag" -> puuid            [regional routing]
+  2. match-v5    (by-puuid/ids)    puuid -> recent Solo/Duo match IDs (queue=420)  [regional routing]
+  3. match-v5    (matches/{id})    match id -> full match detail (all 10 participants)  [regional routing]
+  4. summoner-v4 (by-puuid)        puuid -> encrypted summoner id  [platform routing]
+  5. league-v4   (by-summoner)     summoner id -> rank/LP per queue  [platform routing]
 
-Steps 1-3 all use *regional* routing (europe/americas/asia), which is a
-different concept from the per-platform routing (euw1, na1, ...) used by
-endpoints like summoner-v4/league-v4. EUW1 sits in the "europe" region,
-which is what this bot is configured for.
+Steps 1-3 use *regional* routing (europe/americas/asia) via RIOT_REGION.
+Steps 4-5 use *platform* routing (euw1, na1, ...) via RIOT_PLATFORM instead --
+a different routing concept entirely, so this client talks to two different
+hosts depending on which endpoint is being called.
 """
 import asyncio
 import time
@@ -20,6 +22,9 @@ import aiohttp
 # Riot's queue ID for Ranked Solo/Duo (as opposed to 440 for Ranked Flex,
 # etc.) -- https://static.developer.riotgames.com/docs/lol/queues.json
 SOLO_DUO_QUEUE_ID = 420
+
+# league-v4 identifies queues by name rather than ID.
+SOLO_DUO_QUEUE_TYPE = "RANKED_SOLO_5x5"
 
 
 class RiotAPIError(Exception):
@@ -66,9 +71,10 @@ class RateLimiter:
 
 
 class RiotClient:
-    def __init__(self, api_key: str, region: str = "europe"):
+    def __init__(self, api_key: str, region: str = "europe", platform: str = "euw1"):
         self._headers = {"X-Riot-Token": api_key}
         self._base_url = f"https://{region}.api.riotgames.com"
+        self._platform_url = f"https://{platform}.api.riotgames.com"
         self._session: aiohttp.ClientSession | None = None
         self._rate_limiter = RateLimiter()
 
@@ -118,3 +124,17 @@ class RiotClient:
     async def get_match(self, match_id: str) -> dict | None:
         url = f"{self._base_url}/lol/match/v5/matches/{quote(match_id)}"
         return await self._get(url)
+
+    async def get_solo_duo_rank(self, puuid: str) -> dict | None:
+        """Current Ranked Solo/Duo entry (tier, rank, leaguePoints, wins, losses), or None if unranked."""
+        summoner_url = f"{self._platform_url}/lol/summoner/v4/summoners/by-puuid/{puuid}"
+        summoner = await self._get(summoner_url)
+        if summoner is None:
+            return None
+
+        league_url = f"{self._platform_url}/lol/league/v4/entries/by-summoner/{summoner['id']}"
+        entries = await self._get(league_url)
+        if not entries:
+            return None  # valid summoner, just no ranked games played this season
+
+        return next((e for e in entries if e["queueType"] == SOLO_DUO_QUEUE_TYPE), None)

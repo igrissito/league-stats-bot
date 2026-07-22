@@ -125,6 +125,33 @@ def get_summoner_summary(puuid: str):
         return totals, champs
 
 
+def get_window_summary(puuid: str, window: int = 20):
+    """Win rate / KDA totals over the most recent `window` stored Ranked Solo/Duo games."""
+    with get_connection() as conn:
+        return conn.execute(
+            """SELECT COUNT(*) AS games, SUM(win) AS wins,
+                      SUM(kills) AS k, SUM(deaths) AS d, SUM(assists) AS a
+               FROM (
+                   SELECT * FROM match_participations
+                   WHERE puuid = ? AND queue_id = ?
+                   ORDER BY game_creation DESC LIMIT ?
+               )""",
+            (puuid, SOLO_DUO_QUEUE_ID, window),
+        ).fetchone()
+
+
+def get_recent_matches(puuid: str, limit: int = 5):
+    """The `limit` most recent stored Ranked Solo/Duo games, newest first."""
+    with get_connection() as conn:
+        return conn.execute(
+            """SELECT champion, kills, deaths, assists, win, game_creation
+               FROM match_participations
+               WHERE puuid = ? AND queue_id = ?
+               ORDER BY game_creation DESC LIMIT ?""",
+            (puuid, SOLO_DUO_QUEUE_ID, limit),
+        ).fetchall()
+
+
 def get_leaderboard(min_games: int = 1):
     """Tracked summoners ranked by Ranked Solo/Duo win rate, using whatever history is stored."""
     with get_connection() as conn:

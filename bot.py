@@ -15,7 +15,7 @@ class LoLStatsBot(commands.Bot):
         # Runs once inside the bot's event loop, before it connects to
         # Discord's gateway -- the right place to create the aiohttp-backed
         # Riot client, since aiohttp sessions need a running event loop.
-        self.riot_client = RiotClient(config.RIOT_API_KEY, region=config.RIOT_REGION)
+        self.riot_client = RiotClient(config.RIOT_API_KEY, region=config.RIOT_REGION, platform=config.RIOT_PLATFORM)
 
     async def close(self):
         await self.riot_client.close()
@@ -56,7 +56,10 @@ async def help_command(ctx: commands.Context):
     )
     embed.add_field(
         name="!stats <name>",
-        value="Recent Ranked Solo/Duo KDA, win rate, and top champions for a tracked summoner.",
+        value=(
+            "Rank/LP, win rate & KDA over the last 20 ranked games, the last 5 games "
+            "individually, and all-time top champions for a tracked summoner."
+        ),
         inline=False,
     )
     embed.add_field(
@@ -94,9 +97,18 @@ async def register(ctx: commands.Context, riot_id: str = None):
         await ctx.send(f"**{stored_id}** is already tracked.")
 
 
+def _format_rank(entry: dict | None) -> str:
+    if entry is None:
+        return "Unranked"
+    tier = entry["tier"].title()  # e.g. "GOLD" -> "Gold"
+    apex_tiers = {"Master", "Grandmaster", "Challenger"}  # these have no division (always "I")
+    label = tier if tier in apex_tiers else f"{tier} {entry['rank']}"
+    return f"{label} -- {entry['leaguePoints']} LP ({entry['wins']}W {entry['losses']}L)"
+
+
 @bot.command(name="stats")
 async def stats(ctx: commands.Context, *, name: str = None):
-    """!stats <name> -- recent ranked KDA, win rate and top champions."""
+    """!stats <name> -- rank/LP, win rate & KDA over the last 20 games, and the last 5 games."""
     if not name:
         await ctx.send("Usage: `!stats <name>` (e.g. `!stats Faker`)")
         return
@@ -108,7 +120,9 @@ async def stats(ctx: commands.Context, *, name: str = None):
 
     async with ctx.typing():
         try:
-            match_ids = await bot.riot_client.get_solo_duo_match_ids(summoner["puuid"], count=10)
+            rank = await bot.riot_client.get_solo_duo_rank(summoner["puuid"])
+
+            match_ids = await bot.riot_client.get_solo_duo_match_ids(summoner["puuid"], count=20)
             new_matches = 0
             for match_id in match_ids:
                 if database.match_exists(match_id, summoner["puuid"]):
@@ -145,34 +159,41 @@ async def stats(ctx: commands.Context, *, name: str = None):
             return
 
     totals, champs = database.get_summoner_summary(summoner["puuid"])
-    games = totals["games"] or 0
-    if games == 0:
+    total_games = totals["games"] or 0
+    if total_games == 0:
         await ctx.send(f"No ranked solo/duo matches found yet for **{summoner['riot_id']}**.")
         return
 
-    wins = totals["wins"] or 0
-    win_rate = wins / games * 100
-    kills, deaths, assists = totals["k"] or 0, totals["d"] or 0, totals["a"] or 0
-    kda_ratio = (kills + assists) / deaths if deaths > 0 else float(kills + assists)
+    window = database.get_window_summary(summoner["puuid"], window=20)
+    window_games = window["games"] or 0
+    window_wins = window["wins"] or 0
+    wk, wd, wa = window["k"] or 0, window["d"] or 0, window["a"] or 0
+    window_kda_ratio = (wk + wa) / wd if wd > 0 else float(wk + wa)
+    win_rate_text = f"{window_wins / window_games * 100:.1f}% ({window_wins}W {window_games - window_wins}L)"
+    kda_text = f"{wk / window_games:.1f} / {wd / window_games:.1f} / {wa / window_games:.1f}  ({window_kda_ratio:.2f}:1)"
+
+    recent = database.get_recent_matches(summoner["puuid"], limit=5)
+    recent_lines = [
+        f"{'🟢' if g['win'] else '🔴'} **{g['champion']}** {g['kills']}/{g['deaths']}/{g['assists']}"
+        for g in recent
+    ]
 
     embed = discord.Embed(
         title=f"{summoner['riot_id']} -- Ranked Solo/Duo Stats",
-        description=f"Based on {games} stored solo/duo game(s) ({new_matches} fetched just now)",
+        description=f"{total_games} game(s) stored overall ({new_matches} fetched just now)",
         color=discord.Color.blue(),
     )
-    embed.add_field(name="Win Rate", value=f"{win_rate:.1f}% ({wins}W {games - wins}L)", inline=True)
-    embed.add_field(
-        name="KDA",
-        value=f"{kills / games:.1f} / {deaths / games:.1f} / {assists / games:.1f}  ({kda_ratio:.2f}:1)",
-        inline=True,
-    )
+    embed.add_field(name="Rank", value=_format_rank(rank), inline=True)
+    embed.add_field(name=f"Win Rate (Last {window_games})", value=win_rate_text, inline=True)
+    embed.add_field(name=f"KDA (Last {window_games})", value=kda_text, inline=True)
+    embed.add_field(name="Last 5 Games", value="\n".join(recent_lines), inline=False)
     if champs:
         champ_lines = [
             f"**{c['champion']}** -- {c['games']}g, {(c['wins'] or 0) / c['games'] * 100:.0f}% WR" for c in champs
         ]
-        embed.add_field(name="Top Champions", value="\n".join(champ_lines), inline=False)
+        embed.add_field(name="Top Champions (All-Time)", value="\n".join(champ_lines), inline=False)
     embed.set_footer(
-        text="Stats accumulate over time -- each !stats call fetches up to 10 newest ranked solo/duo games."
+        text="Stats accumulate over time -- each !stats call fetches up to 20 newest ranked solo/duo games."
     )
 
     await ctx.send(embed=embed)

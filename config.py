@@ -14,6 +14,11 @@ RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 # for Riot ID lookups and match history from Austria.
 RIOT_REGION = "europe"
 
+# summoner-v4 and league-v4 (used for current rank/LP) use *platform*
+# routing instead -- a single server cluster like "euw1", not the
+# "europe" regional cluster above.
+RIOT_PLATFORM = "euw1"
+
 DB_PATH = os.getenv("DB_PATH", "lol_stats.db")
 
 if not DISCORD_BOT_TOKEN:
