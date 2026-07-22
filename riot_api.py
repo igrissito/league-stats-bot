@@ -1,16 +1,20 @@
 """Async Riot Games API client: Riot ID -> PUUID -> match history / rank.
 
 Flow used by this bot:
-  1. account-v1  (by-riot-id)      "Name#Tag" -> puuid            [regional routing]
-  2. match-v5    (by-puuid/ids)    puuid -> recent Solo/Duo match IDs (queue=420)  [regional routing]
-  3. match-v5    (matches/{id})    match id -> full match detail (all 10 participants)  [regional routing]
-  4. summoner-v4 (by-puuid)        puuid -> encrypted summoner id  [platform routing]
-  5. league-v4   (by-summoner)     summoner id -> rank/LP per queue  [platform routing]
+  1. account-v1  (by-riot-id)   "Name#Tag" -> puuid                          [regional routing]
+  2. match-v5    (by-puuid/ids) puuid -> recent Solo/Duo match IDs (queue=420) [regional routing]
+  3. match-v5    (matches/{id}) match id -> full match detail (all 10 participants) [regional routing]
+  4. league-v4   (by-puuid)     puuid -> rank/LP per queue                    [platform routing]
 
 Steps 1-3 use *regional* routing (europe/americas/asia) via RIOT_REGION.
-Steps 4-5 use *platform* routing (euw1, na1, ...) via RIOT_PLATFORM instead --
+Step 4 uses *platform* routing (euw1, na1, ...) via RIOT_PLATFORM instead --
 a different routing concept entirely, so this client talks to two different
 hosts depending on which endpoint is being called.
+
+Note: league-v4's by-puuid route is a newer addition that replaced the old
+summoner-v4 -> encryptedSummonerId -> league-v4 by-summoner chain. Riot's
+summoner-v4 by-puuid response no longer reliably includes an `id` field, so
+going by-summoner is a dead end now -- by-puuid is the direct path.
 """
 import asyncio
 import time
@@ -127,14 +131,9 @@ class RiotClient:
 
     async def get_solo_duo_rank(self, puuid: str) -> dict | None:
         """Current Ranked Solo/Duo entry (tier, rank, leaguePoints, wins, losses), or None if unranked."""
-        summoner_url = f"{self._platform_url}/lol/summoner/v4/summoners/by-puuid/{puuid}"
-        summoner = await self._get(summoner_url)
-        if summoner is None:
-            return None
-
-        league_url = f"{self._platform_url}/lol/league/v4/entries/by-summoner/{summoner['id']}"
-        entries = await self._get(league_url)
+        url = f"{self._platform_url}/lol/league/v4/entries/by-puuid/{quote(puuid)}"
+        entries = await self._get(url)
         if not entries:
-            return None  # valid summoner, just no ranked games played this season
+            return None  # no ranked games played this season (or ever)
 
         return next((e for e in entries if e["queueType"] == SOLO_DUO_QUEUE_TYPE), None)

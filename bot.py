@@ -1,4 +1,6 @@
 """Discord bot entry point: !register, !stats, !leaderboard, !help."""
+import traceback
+
 import discord
 from discord.ext import commands
 
@@ -98,12 +100,16 @@ async def register(ctx: commands.Context, riot_id: str = None):
 
 
 def _format_rank(entry: dict | None) -> str:
-    if entry is None:
+    if not entry or "tier" not in entry:
         return "Unranked"
     tier = entry["tier"].title()  # e.g. "GOLD" -> "Gold"
     apex_tiers = {"Master", "Grandmaster", "Challenger"}  # these have no division (always "I")
-    label = tier if tier in apex_tiers else f"{tier} {entry['rank']}"
-    return f"{label} -- {entry['leaguePoints']} LP ({entry['wins']}W {entry['losses']}L)"
+    division = entry.get("rank", "")
+    label = tier if tier in apex_tiers or not division else f"{tier} {division}"
+    lp = entry.get("leaguePoints", 0)
+    wins = entry.get("wins", 0)
+    losses = entry.get("losses", 0)
+    return f"{label} -- {lp} LP ({wins}W {losses}L)"
 
 
 @bot.command(name="stats")
@@ -226,6 +232,9 @@ async def leaderboard(ctx: commands.Context):
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     if isinstance(error, commands.CommandNotFound):
         return
+    # Print the real traceback to our own log -- the message sent to Discord
+    # is deliberately generic, but we still need to see what broke.
+    traceback.print_exception(type(error), error, error.__traceback__)
     await ctx.send(f"Something went wrong: {error}")
 
 
