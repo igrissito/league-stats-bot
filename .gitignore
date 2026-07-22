@@ -1,0 +1,19 @@
+# Environment secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+
+# SQLite database (local accumulated history, not source)
+*.db
+*.sqlite3
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
