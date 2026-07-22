@@ -1,4 +1,4 @@
-"""Discord bot entry point: !register, !stats, !leaderboard."""
+"""Discord bot entry point: !register, !stats, !leaderboard, !help."""
 import discord
 from discord.ext import commands
 
@@ -22,15 +22,50 @@ class LoLStatsBot(commands.Bot):
         await super().close()
 
 
-bot = LoLStatsBot(command_prefix="!", intents=intents)
+bot = LoLStatsBot(command_prefix="!", intents=intents, help_command=None)
 
 
 @bot.event
 async def on_ready():
     # Can fire more than once (e.g. after a reconnect), so one-time setup
     # like database.init_db() happens in main() instead of here.
+    # change_presence sets the "Watching ..." text shown under the bot's
+    # name in the member list -- visible to everyone, no command needed.
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="!help | !register !stats !leaderboard",
+        )
+    )
     print(f"Logged in as {bot.user} (id={bot.user.id})")
-    print("Commands ready: !register  !stats  !leaderboard")
+    print("Commands ready: !register  !stats  !leaderboard  !help")
+
+
+@bot.command(name="help")
+async def help_command(ctx: commands.Context):
+    """!help -- show all commands."""
+    embed = discord.Embed(
+        title="LoL Stats Bot -- Commands",
+        description="Tracks Ranked Solo/Duo stats for the group.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="!register Name#Tag",
+        value="Start tracking a summoner (Riot ID format, e.g. `!register Faker#KR1`).",
+        inline=False,
+    )
+    embed.add_field(
+        name="!stats <name>",
+        value="Recent Ranked Solo/Duo KDA, win rate, and top champions for a tracked summoner.",
+        inline=False,
+    )
+    embed.add_field(
+        name="!leaderboard",
+        value="Ranks all tracked summoners by win rate, based on stored stats.",
+        inline=False,
+    )
+    embed.set_footer(text="Stats accumulate over time -- run !stats for each person periodically.")
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="register")
